@@ -3,7 +3,8 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 
-from models.user import UserCreate, UserLogin, UserResponse, Token
+from models.user import UserCreate, UserLogin, UserResponse, Token, TokenPair, RefreshRequest
+from config import config
 from services.simple_auth_service import simple_auth_service
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -30,7 +31,7 @@ async def register(user_data: UserCreate):
         )
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=TokenPair)
 async def login(user_credentials: UserLogin):
     """تسجيل الدخول"""
     user = await simple_auth_service.authenticate_user(
@@ -46,10 +47,14 @@ async def login(user_credentials: UserLogin):
         )
     
     # إنشاء الرمز المميز
-    access_token_expires = timedelta(minutes=30 * 24 * 60)  # 30 يوم
+    access_token_expires = timedelta(minutes=config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = simple_auth_service.create_access_token(
         data={"sub": user.username, "user_id": str(user.id)},
         expires_delta=access_token_expires
+    )
+    refresh_token, _ = simple_auth_service.create_refresh_token(
+        username=user.username,
+        user_id=str(user.id),
     )
     
     # تحديث آخر تسجيل دخول
@@ -57,8 +62,9 @@ async def login(user_credentials: UserLogin):
     
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": int(access_token_expires.total_seconds())
+        "expires_in": int(access_token_expires.total_seconds()),
     }
 
 
@@ -85,43 +91,46 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return UserResponse(**user.to_dict())
 
 
-@router.post("/refresh", response_model=Token)
-async def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """تجديد الرمز المميز"""
-    token_data = simple_auth_service.verify_token(credentials.credentials)
-    
-    if not token_data:
+@router.post("/refresh", response_model=TokenPair)
+async def refresh_token(body: RefreshRequest):
+    """تجديد الرمز المميز باستخدام refresh token (مع تدوير)."""
+    verified = simple_auth_service.verify_refresh_token(body.refresh_token)
+    if not verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="رمز مميز غير صحيح أو منتهي الصلاحية",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Refresh token غير صحيح أو مُبطل أو منتهي",
         )
-    
+
+    token_data, jti = verified
+
     user = await simple_auth_service.get_user_by_username(token_data.username)
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="المستخدم غير موجود أو غير نشط",
-            headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # إنشاء رمز مميز جديد
-    access_token_expires = timedelta(minutes=30 * 24 * 60)  # 30 يوم
-    access_token = simple_auth_service.create_access_token(
+
+    # إنشاء access جديد وتدوير refresh
+    access_token_expires = timedelta(minutes=config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access_token = simple_auth_service.create_access_token(
         data={"sub": user.username, "user_id": str(user.id)},
-        expires_delta=access_token_expires
+        expires_delta=access_token_expires,
     )
-    
+    new_refresh_token = simple_auth_service.rotate_refresh_token(jti, user.username, str(user.id))
+
     return {
-        "access_token": access_token,
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
         "token_type": "bearer",
-        "expires_in": int(access_token_expires.total_seconds())
+        "expires_in": int(access_token_expires.total_seconds()),
     }
 
 
 @router.post("/logout")
-async def logout():
-    """تسجيل الخروج (على العميل حذف الرمز المميز)"""
+async def logout(body: Optional[RefreshRequest] = None):
+    """تسجيل الخروج: إبطال refresh token إن تم تمريره، وعلى العميل حذف access."""
+    if body and body.refresh_token:
+        simple_auth_service.revoke_refresh_token(body.refresh_token)
     return {"message": "تم تسجيل الخروج بنجاح"}
 
 

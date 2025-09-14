@@ -4,19 +4,26 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple, Dict, Any
+import uuid
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from config import config
 
 from models.user import User, UserCreate, UserLogin, Token, TokenData
 
-# إعدادات JWT
-SECRET_KEY = "your-secret-key-here-change-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 يوم
+# إعدادات JWT من متغيرات البيئة
+SECRET_KEY = config.JWT_SECRET_KEY
+ALGORITHM = config.JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+REFRESH_TOKEN_EXPIRE_MINUTES = config.JWT_REFRESH_TOKEN_EXPIRE_MINUTES
 
 # إعداد تشفير كلمات المرور
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=config.BCRYPT_ROUNDS,
+)
 
 # مستخدم افتراضي في الذاكرة (للتطوير فقط)
 DEFAULT_ADMIN = {
@@ -47,6 +54,10 @@ DEFAULT_USER = {
 # قائمة المستخدمين في الذاكرة (للتطوير فقط)
 MEMORY_USERS = [DEFAULT_ADMIN, DEFAULT_USER]
 
+# تخزين refresh tokens في الذاكرة (للتطوير فقط)
+# المفتاح هو jti والقيمة تحتوي على بيانات المالك وحالة الإبطال
+REFRESH_TOKENS: Dict[str, Dict[str, Any]] = {}
+
 
 class SimpleAuthService:
     """خدمة مصادقة مبسطة للتطوير"""
@@ -62,6 +73,72 @@ class SimpleAuthService:
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
+
+    def create_refresh_token(self, username: str, user_id: str, expires_delta: Optional[timedelta] = None) -> Tuple[str, str]:
+        """إنشاء refresh token وإرجاعه مع jti."""
+        jti = uuid.uuid4().hex
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+
+        payload = {
+            "sub": username,
+            "user_id": user_id,
+            "type": "refresh",
+            "jti": jti,
+            "exp": expire,
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+        REFRESH_TOKENS[jti] = {
+            "username": username,
+            "user_id": user_id,
+            "expires_at": expire,
+            "revoked": False,
+        }
+        return token, jti
+
+    def verify_refresh_token(self, token: str) -> Optional[Tuple[TokenData, str]]:
+        """التحقق من refresh token وإرجاع TokenData و jti إذا كان صالحاً وغير مُبطل."""
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("type") != "refresh":
+                return None
+            username: str = payload.get("sub")
+            user_id: str = payload.get("user_id")
+            jti: str = payload.get("jti")
+            if not username or not user_id or not jti:
+                return None
+            meta = REFRESH_TOKENS.get(jti)
+            if meta is None or meta.get("revoked"):
+                return None
+            return TokenData(username=username, user_id=user_id), jti
+        except JWTError:
+            return None
+
+    def rotate_refresh_token(self, old_jti: str, username: str, user_id: str) -> str:
+        """إبطال refresh القديم وإنشاء جديد وإرجاعه."""
+        if old_jti in REFRESH_TOKENS:
+            REFRESH_TOKENS[old_jti]["revoked"] = True
+        new_token, new_jti = self.create_refresh_token(username, user_id)
+        return new_token
+
+    def revoke_refresh_token(self, token: str) -> bool:
+        """إبطال refresh token المُعطى. يعيد True إن تم الإبطال."""
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("type") != "refresh":
+                return False
+            jti: str = payload.get("jti")
+            if not jti:
+                return False
+            if jti in REFRESH_TOKENS:
+                REFRESH_TOKENS[jti]["revoked"] = True
+                return True
+            # إذا لم يكن موجوداً، لا نفعل شيئاً (قد يكون منتهي)
+            return False
+        except JWTError:
+            return False
 
     def verify_token(self, token: str) -> Optional[TokenData]:
         """التحقق من صحة الرمز المميز"""

@@ -75,6 +75,19 @@ class Token(BaseModel):
     expires_in: int  # بالثواني
 
 
+class TokenPair(BaseModel):
+    """زوج رموز الدخول والتحديث"""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int  # مدة صلاحية access (بالثواني)
+
+
+class RefreshRequest(BaseModel):
+    """طلب تجديد باستخدام refresh token"""
+    refresh_token: str
+
+
 class TokenData(BaseModel):
     """بيانات الرمز المميز"""
     username: Optional[str] = None

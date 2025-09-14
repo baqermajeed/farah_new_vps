@@ -14,8 +14,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # المسارات المحمية (تتطلب مصادقة)
         self.protected_paths = protected_paths or [
             "/patients",
-            "/auth/me",
-            "/auth/refresh"
+            "/auth/me"
         ]
         # المسارات المستثناة من المصادقة
         self.excluded_paths = [
@@ -25,7 +24,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/openapi.json",
             "/auth/login",
-            "/auth/register"
+            "/auth/register",
+            "/auth/refresh"
         ]
 
     async def dispatch(self, request: Request, call_next):

@@ -2,19 +2,24 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from config import config
 from motor.motor_asyncio import AsyncIOMotorCollection
 from bson import ObjectId
 
 from models.user import User, UserCreate, UserLogin, Token, TokenData
 from services.database import db_service
 
-# إعدادات JWT
-SECRET_KEY = "your-secret-key-here-change-in-production"  # يجب تغييرها في الإنتاج
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 يوم
+# إعدادات JWT من متغيرات البيئة
+SECRET_KEY = config.JWT_SECRET_KEY
+ALGORITHM = config.JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
 # إعداد تشفير كلمات المرور
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=config.BCRYPT_ROUNDS,
+)
 
 
 class AuthService:
