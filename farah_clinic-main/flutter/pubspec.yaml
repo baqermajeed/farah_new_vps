@@ -57,6 +57,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   
+  flutter_launcher_icons: ^0.13.1
   
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -109,3 +110,16 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: false
+  ios: false
+  web:
+    generate: false
+  macos:
+    generate: false
+  linux:
+    generate: false
+  windows:
+    generate: true
+    image_path: assets/new-farah.png

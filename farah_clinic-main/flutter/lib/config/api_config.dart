@@ -7,11 +7,7 @@ class ApiConfig {
 
   // استخدم baseUrl المناسب حسب البيئة
   static String get baseUrl {
-    // يمكن تمريره عند البناء: --dart-define=API_BASE_URL=https://your-domain.com
-    const String envUrl =
-        String.fromEnvironment('API_BASE_URL', defaultValue: '');
-    if (envUrl.isNotEmpty) return envUrl;
-    return localhost;
+    return 'http://168.231.87.21'; // ضع هنا IP أو دومين السيرفر
   }
 
   // مسارات API الجديدة

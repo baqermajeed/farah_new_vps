@@ -378,8 +378,8 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
       margin: const EdgeInsets.all(0),
       child: Table(
         border: TableBorder.all(
-          color: Colors.grey[400]!,
-          width: 1,
+          color: Colors.black,
+          width: 1.2,
         ),
         children: [
           // رأس الجدول
@@ -411,12 +411,15 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
   }
 
   Widget _buildPaymentScheduleTable() {
+    const int totalRows = 10; // عرض/طباعة 10 صفوف فقط
+    final dateFormat = DateFormat('yyyy/MM/dd');
+
     return Container(
       margin: const EdgeInsets.only(top: 0),
       child: Table(
         border: TableBorder.all(
-          color: Colors.grey[400]!,
-          width: 1,
+          color: Colors.black,
+          width: 1.2,
         ),
         children: [
           // رأس جدول الدفعات
@@ -430,19 +433,27 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
               _buildTableHeaderCell('الملاحظات'),
             ],
           ),
-          // بيانات الدفعات
-          ..._invoiceData!.installments.asMap().entries.map((entry) {
-            int index = entry.key;
-            PaymentInstallment installment = entry.value;
-            final dateFormat = DateFormat('yyyy/MM/dd');
-
-            return TableRow(
-              children: [
-                _buildTableCell(dateFormat.format(installment.paymentDate)),
-                _buildAmountCell(index), // استخدام حقل نص قابل للتحرير
-                _buildNotesCell(index),
-              ],
-            );
+          // 10 صفوف ثابتة (تُملأ من البيانات أو تُترك فارغة)
+          ...List.generate(totalRows, (index) {
+            if (index < _invoiceData!.installments.length) {
+              final PaymentInstallment installment =
+                  _invoiceData!.installments[index];
+              return TableRow(
+                children: [
+                  _buildTableCell(dateFormat.format(installment.paymentDate)),
+                  _buildAmountCell(index),
+                  _buildNotesCell(index),
+                ],
+              );
+            } else {
+              return TableRow(
+                children: [
+                  _buildTableCell(''),
+                  _buildTableCell(''),
+                  _buildTableCell(''),
+                ],
+              );
+            }
           }),
         ],
       ),
@@ -581,6 +592,7 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
                   if (_invoiceData != null) {
                     final pdf = await _generateNewInvoicePdf();
                     await Printing.layoutPdf(
+                      format: PdfPageFormat.a4,
                       onLayout: (PdfPageFormat format) async => pdf.save(),
                     );
                   }
@@ -600,147 +612,169 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
 
     final pdf = pw.Document();
     final dateFormat = DateFormat('yyyy/MM/dd');
+    final double margin = 10 * PdfPageFormat.mm; // هامش 10 مم من كل الأطراف
+    final double rowHeight =
+        15 * PdfPageFormat.mm; // ارتفاع ثابت لكل صف (مواءم لـ A4 مع 10 صفوف)
 
-    // تحميل الخط العربي
-    final arabicFont = await PdfGoogleFonts.amiriRegular();
-    final arabicBoldFont = await PdfGoogleFonts.amiriBold();
+    // تحميل الخط العربي (محلياً إن توفر، وإلا من Google Fonts)
+    late pw.Font arabicFont;
+    late pw.Font arabicBoldFont;
+    try {
+      final regularData =
+          await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
+      arabicFont = pw.Font.ttf(regularData);
+      final boldData = await rootBundle.load('assets/fonts/Amiri-Bold.ttf');
+      arabicBoldFont = pw.Font.ttf(boldData);
+    } catch (_) {
+      arabicFont = await PdfGoogleFonts.amiriRegular();
+      arabicBoldFont = await PdfGoogleFonts.amiriBold();
+    }
 
     // تحميل صورة اللوغو
     final logoBytes = await rootBundle.load('assets/new-farah.png');
     final logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
 
+    // حدود واضحة للجدول (خطوط داخلية وخارجية أوضح للطباعة)
+    final pw.TableBorder tableBorder = pw.TableBorder.symmetric(
+      inside: const pw.BorderSide(color: PdfColors.black, width: 1.2),
+      outside: const pw.BorderSide(color: PdfColors.black, width: 1.2),
+    );
+
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: PdfPageFormat.a4.copyWith(
+          marginLeft: margin,
+          marginRight: margin,
+          marginTop: margin,
+          marginBottom: margin,
+        ),
         build: (pw.Context context) {
-          return pw.Padding(
-            padding: const pw.EdgeInsets.all(24),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: [
-                // رأس الاستمارة
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(20),
-                  decoration: const pw.BoxDecoration(
-                    color: PdfColor.fromInt(0xFF1E5478), // نفس لون التطبيق
-                  ),
-                  child: pw.Row(
-                    children: [
-                      pw.Container(
+          // تجهيز 10 صفوف ثابتة لجدول الدفعات
+          final List<pw.TableRow> fixedRows = List.generate(10, (i) {
+            if (i < _invoiceData!.installments.length) {
+              final inst = _invoiceData!.installments[i];
+              final String dateText = dateFormat.format(inst.paymentDate);
+              final String amountText =
+                  '${NumberFormatter.formatNumber(inst.amount)} دينار';
+              final String notesText = inst.notes.isNotEmpty ? inst.notes : '';
+              return pw.TableRow(children: [
+                _buildPdfTableCell(dateText, arabicFont, height: rowHeight),
+                _buildPdfTableCell(amountText, arabicFont, height: rowHeight),
+                _buildPdfTableCell(notesText, arabicFont, height: rowHeight),
+              ]);
+            } else {
+              return pw.TableRow(children: [
+                _buildPdfTableCell('', arabicFont, height: rowHeight),
+                _buildPdfTableCell('', arabicFont, height: rowHeight),
+                _buildPdfTableCell('', arabicFont, height: rowHeight),
+              ]);
+            }
+          });
+
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              // رأس الاستمارة
+              pw.Container(
+                padding: const pw.EdgeInsets.all(20),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColor.fromInt(0xFF1E5478), // نفس لون التطبيق
+                ),
+                child: pw.Row(
+                  children: [
+                    pw.Container(
+                      width: 80,
+                      height: 80,
+                      child: pw.Image(
+                        logoImage,
                         width: 80,
                         height: 80,
-                        child: pw.Image(
-                          logoImage,
-                          width: 80,
-                          height: 80,
-                          fit: pw.BoxFit.cover,
-                        ),
+                        fit: pw.BoxFit.cover,
                       ),
-                      pw.SizedBox(width: 20),
-                      pw.Expanded(
-                        child: pw.Text(
-                          'عيادة فرح لطب الأسنان',
-                          style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontSize: 24,
-                            fontWeight: pw.FontWeight.bold,
-                            font: arabicBoldFont,
-                          ),
-                          textAlign: pw.TextAlign.center,
-                          textDirection: pw.TextDirection.rtl,
+                    ),
+                    pw.SizedBox(width: 20),
+                    pw.Expanded(
+                      child: pw.Text(
+                        'عيادة فرح لطب الأسنان',
+                        style: pw.TextStyle(
+                          color: PdfColors.white,
+                          fontSize: 24,
+                          fontWeight: pw.FontWeight.bold,
+                          font: arabicBoldFont,
                         ),
+                        textAlign: pw.TextAlign.center,
+                        textDirection: pw.TextDirection.rtl,
                       ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // جدول معلومات المريض
+              pw.Table(
+                border: tableBorder,
+                children: [
+                  // رأس الجدول
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColor.fromInt(0xFF1E5478), // نفس لون التطبيق
+                    ),
+                    children: [
+                      _buildPdfTableHeaderCell('اسم المراجع', arabicBoldFont),
+                      _buildPdfTableHeaderCell('المبلغ الكلي', arabicBoldFont),
+                      _buildPdfTableHeaderCell('المدة', arabicBoldFont),
+                      _buildPdfTableHeaderCell('تاريخ التسجيل', arabicBoldFont),
                     ],
                   ),
-                ),
-
-                // جدول معلومات المريض
-                pw.Table(
-                  border: pw.TableBorder.all(
-                    color: PdfColors.grey400,
-                    width: 1,
+                  // بيانات المريض
+                  pw.TableRow(
+                    children: [
+                      _buildPdfTableCell(_invoiceData!.patientName, arabicFont),
+                      _buildPdfTableCell(
+                          '${NumberFormatter.formatNumber(_invoiceData!.totalAmount)} دينار عراقي',
+                          arabicFont),
+                      _buildPdfTableCell(
+                          _getDurationText(_invoiceData!.totalMonths),
+                          arabicFont),
+                      _buildPdfTableCell(
+                          dateFormat.format(_invoiceData!.registrationDate),
+                          arabicFont),
+                    ],
                   ),
-                  children: [
-                    // رأس الجدول
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(
-                        color: PdfColor.fromInt(0xFF1E5478), // نفس لون التطبيق
-                      ),
-                      children: [
-                        _buildPdfTableHeaderCell('اسم المراجع', arabicBoldFont),
-                        _buildPdfTableHeaderCell(
-                            'المبلغ الكلي', arabicBoldFont),
-                        _buildPdfTableHeaderCell('المدة', arabicBoldFont),
-                        _buildPdfTableHeaderCell(
-                            'تاريخ التسجيل', arabicBoldFont),
-                      ],
-                    ),
-                    // بيانات المريض
-                    pw.TableRow(
-                      children: [
-                        _buildPdfTableCell(
-                            _invoiceData!.patientName, arabicFont),
-                        _buildPdfTableCell(
-                            '${NumberFormatter.formatNumber(_invoiceData!.totalAmount)} دينار عراقي',
-                            arabicFont),
-                        _buildPdfTableCell(
-                            _getDurationText(_invoiceData!.totalMonths),
-                            arabicFont),
-                        _buildPdfTableCell(
-                            dateFormat.format(_invoiceData!.registrationDate),
-                            arabicFont),
-                      ],
-                    ),
-                  ],
-                ),
+                ],
+              ),
 
-                pw.SizedBox(height: 8),
+              pw.SizedBox(height: 8),
 
-                // جدول الدفعات
-                pw.Table(
-                  border: pw.TableBorder.all(
-                    color: PdfColors.grey400,
-                    width: 1,
+              // جدول الدفعات (10 صفوف ثابتة)
+              pw.Table(
+                border: tableBorder,
+                columnWidths: const {
+                  0: pw.FlexColumnWidth(2), // التاريخ
+                  1: pw.FlexColumnWidth(2), // المبلغ
+                  2: pw.FlexColumnWidth(3), // الملاحظات
+                },
+                children: [
+                  // رأس جدول الدفعات
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColor.fromInt(
+                          0xFFD29700), // نفس اللون الذهبي للتطبيق
+                    ),
+                    children: [
+                      _buildPdfTableHeaderCell('تاريخ الدفعات', arabicBoldFont,
+                          height: rowHeight),
+                      _buildPdfTableHeaderCell('المبلغ المطلوب', arabicBoldFont,
+                          height: rowHeight),
+                      _buildPdfTableHeaderCell('الملاحظات', arabicBoldFont,
+                          height: rowHeight),
+                    ],
                   ),
-                  children: [
-                    // رأس جدول الدفعات
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(
-                        color: PdfColor.fromInt(
-                            0xFFD29700), // نفس اللون الذهبي للتطبيق
-                      ),
-                      children: [
-                        _buildPdfTableHeaderCell(
-                            'تاريخ الدفعات', arabicBoldFont),
-                        _buildPdfTableHeaderCell(
-                            'المبلغ المطلوب', arabicBoldFont),
-                        _buildPdfTableHeaderCell('الملاحظات', arabicBoldFont),
-                      ],
-                    ),
-                    // بيانات الدفعات بحسب عدد الأشهر
-                    ..._invoiceData!.installments.asMap().entries.map((entry) {
-                      int index = entry.key;
-                      var installment = entry.value;
-                      final String dateText =
-                          dateFormat.format(installment.paymentDate);
-                      final String amountText = index == 0
-                          ? '${NumberFormatter.formatNumber(installment.amount)} دينار'
-                          : '';
-                      final String notesText =
-                          installment.notes.isNotEmpty ? installment.notes : '';
-
-                      return pw.TableRow(
-                        children: [
-                          _buildPdfTableCell(dateText, arabicFont),
-                          _buildPdfTableCell(amountText, arabicFont),
-                          _buildPdfTableCell(notesText, arabicFont),
-                        ],
-                      );
-                    }),
-                  ],
-                ),
-              ],
-            ),
+                  // 10 صفوف دائماً
+                  ...fixedRows,
+                ],
+              ),
+            ],
           );
         },
       ),
@@ -749,9 +783,11 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
     return pdf;
   }
 
-  pw.Widget _buildPdfTableHeaderCell(String text, pw.Font font) {
+  pw.Widget _buildPdfTableHeaderCell(String text, pw.Font font,
+      {double? height}) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(12),
+      height: height,
       child: pw.Text(
         text,
         style: pw.TextStyle(
@@ -766,9 +802,10 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
     );
   }
 
-  pw.Widget _buildPdfTableCell(String text, pw.Font font) {
+  pw.Widget _buildPdfTableCell(String text, pw.Font font, {double? height}) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(12),
+      height: height,
       child: pw.Text(
         text,
         style: pw.TextStyle(
@@ -778,6 +815,7 @@ class _InvoiceFormScreenState extends State<InvoiceFormScreen> {
         ),
         textAlign: pw.TextAlign.center,
         textDirection: pw.TextDirection.rtl,
+        maxLines: 1,
       ),
     );
   }
